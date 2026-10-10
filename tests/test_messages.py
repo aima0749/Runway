@@ -65,11 +65,98 @@ def test_every_message_is_under_600_characters(lang, tone):
 
 
 @pytest.mark.parametrize(
-    ("lang", "deadline_phrase"),
-    [("en", "within 7 days"), ("ur", "7 din ke andar")],
+    ("lang", "expected_overdue", "expected_deadline"),
+    [
+        ("en", "3 days overdue", "by 27 Oct 2026"),
+        ("ur", "3 din overdue", "27 Oct 2026 tak"),
+    ],
 )
-def test_final_tone_uses_fixed_deadline_phrase(lang, deadline_phrase):
+def test_final_tone_uses_both_valid_optional_values(lang, expected_overdue, expected_deadline):
+    invoice = {**INVOICE, "days_overdue": 3, "pay_by": "2026-10-27"}
+
+    message = draft_reminder("Ayesha Khan", invoice, tone="final", lang=lang)
+
+    assert expected_overdue in message
+    assert expected_deadline in message
+    assert len(message) < 600
+
+
+@pytest.mark.parametrize(
+    ("lang", "expected_overdue", "fallback_deadline"),
+    [
+        ("en", "3 days overdue", "within 7 days"),
+        ("ur", "3 din overdue", "7 din ke andar"),
+    ],
+)
+def test_final_tone_with_only_days_overdue(lang, expected_overdue, fallback_deadline):
+    invoice = {**INVOICE, "days_overdue": 3}
+
+    message = draft_reminder("Ayesha Khan", invoice, tone="final", lang=lang)
+
+    assert expected_overdue in message
+    assert fallback_deadline in message
+    assert len(message) < 600
+
+
+@pytest.mark.parametrize(
+    ("lang", "fallback_overdue", "expected_deadline"),
+    [
+        ("en", "is overdue", "by 27 Oct 2026"),
+        ("ur", "overdue hai", "27 Oct 2026 tak"),
+    ],
+)
+def test_final_tone_with_only_pay_by(lang, fallback_overdue, expected_deadline):
+    invoice = {**INVOICE, "pay_by": "2026-10-27"}
+
+    message = draft_reminder("Ayesha Khan", invoice, tone="final", lang=lang)
+
+    assert fallback_overdue in message
+    assert expected_deadline in message
+    assert len(message) < 600
+
+
+@pytest.mark.parametrize(
+    ("lang", "fallback_overdue", "fallback_deadline"),
+    [
+        ("en", "is overdue", "within 7 days"),
+        ("ur", "overdue hai", "7 din ke andar"),
+    ],
+)
+def test_final_tone_without_optional_values_uses_fallbacks(lang, fallback_overdue, fallback_deadline):
     message = draft_reminder("Ayesha Khan", INVOICE, tone="final", lang=lang)
 
-    assert deadline_phrase in message
-    assert "27 Oct 2026" not in message
+    assert fallback_overdue in message
+    assert fallback_deadline in message
+    assert len(message) < 600
+
+
+@pytest.mark.parametrize(
+    ("lang", "fallback_overdue", "fallback_deadline"),
+    [
+        ("en", "is overdue", "within 7 days"),
+        ("ur", "overdue hai", "7 din ke andar"),
+    ],
+)
+def test_invalid_optional_values_use_fallbacks(lang, fallback_overdue, fallback_deadline):
+    invoice = {
+        **INVOICE,
+        "days_overdue": -2,
+        "pay_by": "not-a-date",
+        "days_late": 99,
+    }
+
+    message = draft_reminder("Ayesha Khan", invoice, tone="final", lang=lang)
+
+    assert fallback_overdue in message
+    assert fallback_deadline in message
+    assert "99" not in message
+
+
+@pytest.mark.parametrize("lang", LANGS)
+def test_final_tone_uses_singular_day(lang):
+    message = draft_reminder(
+        "Ayesha Khan", {**INVOICE, "days_overdue": 1}, tone="final", lang=lang
+    )
+
+    assert ("1 day overdue" if lang == "en" else "1 din overdue") in message
+    assert len(message) < 600
