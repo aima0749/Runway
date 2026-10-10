@@ -1,5 +1,6 @@
 """Agent tools. Pure functions, JSON in / JSON out. The LLM never calculates; it calls these."""
 from dataclasses import asdict
+import re
 import numpy as np
 import pandas as pd
 
@@ -93,14 +94,23 @@ def run_what_if(change: dict) -> dict:
     t = (change or {}).get("type")
     if t not in WHAT_IF_TYPES:
         return {"error": f"Unknown change type '{t}'. Use one of {sorted(WHAT_IF_TYPES)}."}
-    res = decisions.run_what_if(get_engine(), change)
-    res = dict(res)
+    e = get_engine()
+    res = dict(decisions.run_what_if(e, change))
     res["change"] = change
     res["p_before_pct"] = _pct(res["p_before"])
     res["p_after_pct"] = _pct(res["p_after"])
     res["status_after"] = decisions.status(res["p_after"])
+    start = change.get("start") or change.get("due_date")
+    if start:
+        try:
+            offset = (pd.Timestamp(start) - e.as_of).days
+            horizon = int(e.sim.paths.shape[1])
+            if offset > horizon:
+                res["warning"] = (f"This starts {offset} days from now, beyond the {horizon}-day "
+                                  "forecast window, so it is not reflected in these numbers.")
+        except Exception:
+            pass
     return res
-
 
 # ---------- Tool 3 ----------
 def rank_chase(top_n: int = CHASE_TOP_N) -> dict:
@@ -157,11 +167,56 @@ def draft_reminder(invoice_id: str, lang: str = "en", tone: str = "friendly") ->
 
 
 # ---------- Tool 6 (real logic comes in Step 6) ----------
+def _parser_llm():
+    """Real LLM if available; None means rules-only parsing."""
+    try:
+        from src.agent import get_llm
+        llm = get_llm()
+        return None if llm.name == "mock" else llm
+    except Exception:
+        return None
+
+
 def add_invoice_from_text(text: str) -> dict:
-    """STUB: parser.py arrives in Step 6. Never saves; the user must confirm first."""
-    return {"status": "needs_confirmation",
-            "parsed": {"client": None, "amount_pkr": None, "due_date": None},
-            "note": "Parser not implemented yet."}
+    """Proposes an invoice. NEVER saves. Saving happens in save_invoice() after the user confirms."""
+    from src.parser import parse_invoice_text
+    e = get_engine()
+    return parse_invoice_text(text, e.ds.clients, e.as_of, llm=_parser_llm())
+
+
+def _next_id(series, prefix):
+    nums = [int(m.group(1)) for s in series.astype(str) if (m := re.match(rf"{prefix}(\d+)$", s))]
+    return f"{prefix}{max(nums, default=0) + 1}"
+
+
+def save_invoice(parsed: dict) -> dict:
+    """Called only by the UI after the owner clicks Confirm. NOT in TOOLS, so the LLM cannot call it."""
+    e = get_engine()
+    ds = e.ds
+    try:
+        amount = float(parsed["amount_pkr"])
+        due = pd.Timestamp(parsed["due_date"])
+        issue = pd.Timestamp(parsed.get("issue_date") or e.as_of)
+    except Exception:
+        return {"error": "The invoice details are incomplete."}
+    if amount <= 0 or due < issue:
+        return {"error": "The amount must be positive and the due date cannot be before the issue date."}
+    client_id = parsed.get("client_id")
+    if not client_id:
+        name = (parsed.get("client_name") or "").strip()
+        if not name:
+            return {"error": "The client name is missing."}
+        client_id = _next_id(ds.clients["client_id"], "C")
+        new = pd.DataFrame([{"client_id": client_id, "name": name, "segment": "sme"}])
+        ds.clients = pd.concat([ds.clients, new], ignore_index=True)
+    inv_id = _next_id(ds.invoices["invoice_id"], "INV")
+    row = pd.DataFrame([{"invoice_id": inv_id, "client_id": client_id,
+                         "issue_date": issue.strftime("%Y-%m-%d"), "due_date": due.strftime("%Y-%m-%d"),
+                         "amount_pkr": amount, "paid_date": None}])
+    ds.invoices = pd.concat([ds.invoices, row], ignore_index=True)
+    e.rebuild()
+    return {"saved": True, "invoice_id": inv_id, "client_id": client_id,
+            "p_shortfall_pct": _pct(e.sim.p_shortfall)}
 
 
 # ---------- Registry + schemas for the LLM ----------
