@@ -190,8 +190,12 @@ def draft_reminder(invoice_id: str, lang: str = "en", tone: str = "friendly") ->
     e = get_engine()
     name_row = e.ds.clients[e.ds.clients["client_id"] == inv["client_id"]]
     client = name_row["name"].iloc[0] if len(name_row) else inv["client_id"]
-    text = _draft(client, inv, tone, lang)
-    return {"invoice_id": invoice_id, "lang": lang, "tone": tone, "message": text}
+    days_late = max(0, (e.as_of - pd.Timestamp(inv["due_date"])).days)
+    pay_by = (e.as_of + pd.Timedelta(7, unit="D")).strftime("%Y-%m-%d")
+    payload = dict(inv, days_late=days_late, days_overdue=days_late, pay_by=pay_by)
+    text = _draft(client, payload, tone, lang)
+    return {"invoice_id": invoice_id, "lang": lang, "tone": tone, "message": text,
+            "days_overdue": days_late, "pay_by": pay_by}
 
 
 # ---------- Tool 6 (real logic comes in Step 6) ----------
