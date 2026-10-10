@@ -87,7 +87,7 @@ class DelayModel:
             raise ValueError("cannot fit on an empty dataset")
         durations = np.asarray(T, dtype=float).reshape(-1)
         events_raw = np.asarray(E, dtype=float).reshape(-1)
-        if len(durations) != len(transformed) or len(events) != len(transformed):
+        if len(durations) != len(transformed) or len(events_raw) != len(transformed):
             raise ValueError("X, T, and E must have matching row counts")
         if np.any(~np.isfinite(durations)) or np.any(durations <= 0):
             raise ValueError("T must contain finite positive durations")
