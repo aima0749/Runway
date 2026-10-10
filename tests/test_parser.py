@@ -57,8 +57,7 @@ def test_llm_can_supply_a_date_the_rules_cannot():
 
 def test_save_invoice_adds_and_rebuilds():
     from src import tools
-    from src.generator import generate_business
-    tools.set_engine(generate_business())
+    tools.set_engine(tools.default_dataset())
     e = tools.get_engine()
     before = len(e.ds.invoices)
     due = (e.as_of + pd.Timedelta(20, unit="D")).strftime("%Y-%m-%d")
@@ -66,8 +65,7 @@ def test_save_invoice_adds_and_rebuilds():
                               "issue_date": e.as_of.strftime("%Y-%m-%d"), "due_date": due})
     assert res.get("saved") and len(tools.get_engine().ds.invoices) == before + 1
     assert "error" in tools.save_invoice({"client_name": "X", "amount_pkr": -5, "due_date": due})
-    tools.set_engine(generate_business())
-
+    tools.set_engine(tools.default_dataset())
 
 def test_agent_proposes_but_never_saves(monkeypatch):
     from src import tools

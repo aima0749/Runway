@@ -5,6 +5,7 @@ import re
 from dotenv import load_dotenv
 
 from config import MAX_AGENT_STEPS
+from src import tools
 from src.tools import TOOL_SCHEMAS, call_tool, get_engine
 from src.guardrail import verify_answer, fallback_answer, detect_lang
 
@@ -50,7 +51,7 @@ class GroqLLM:
         self.model = model or os.getenv("LLM_MODEL") or DEFAULT_MODEL
         self.client = Groq(api_key=self.api_key)
 
-        def chat(self, messages, tools):
+    def chat(self, messages, tools):
         kwargs = dict(model=self.model, messages=messages, temperature=0, max_tokens=2000)
         if tools:
             kwargs.update(tools=tools, tool_choice="auto")
@@ -64,6 +65,7 @@ class GroqLLM:
                 args = {}
             calls.append({"id": tc.id, "name": tc.function.name, "arguments": args})
         return {"content": msg.content, "tool_calls": calls}
+
 
 class MockLLM:
     """Keyword-routed fake LLM. Lets you test the loop with no key and no network."""

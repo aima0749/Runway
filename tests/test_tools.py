@@ -22,10 +22,12 @@ def test_what_if_valid_and_invalid():
     assert "error" in bad
 
 def test_invoice_and_reminder():
-    inv = call_tool("get_invoice", {"invoice_id": "INV3"})
+    from src.tools import get_engine
+    inv_id = get_engine().open_inv["invoice_id"].iloc[0]
+    inv = call_tool("get_invoice", {"invoice_id": inv_id})
     assert "predicted_pay_date" in inv
     assert "error" in call_tool("get_invoice", {"invoice_id": "NOPE"})
-    msg = call_tool("draft_reminder", {"invoice_id": "INV3", "lang": "ur", "tone": "firm"})
+    msg = call_tool("draft_reminder", {"invoice_id": inv_id, "lang": "ur", "tone": "firm"})
     assert "message" in msg
 
 def test_unknown_tool_does_not_crash():

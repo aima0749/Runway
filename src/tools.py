@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from config import SEED, N_SIMS, CHASE_TOP_N, LANGS, TONES
-from src.generator import generate_business
+from src.schemas import Dataset, Settings
 from src.features import build_features
 from src.delay_model import DelayModel
 from src.simulate import simulate_cash
@@ -13,10 +13,23 @@ from src import decisions
 from src.messages import draft_reminder as _draft
 
 
+def default_dataset():
+    """The scripted 'Ayesha Studio' demo scenario (Dev A's scenario_ayesha.py)."""
+    from src.scenario_ayesha import make_ayesha_dataset
+    return make_ayesha_dataset()
+
+
+def synthetic_dataset(seed=0, mode="easy", as_of="2025-06-30", opening_cash=500000.0):
+    """Wrap Dev A's generator (3 DataFrames) into a Dataset."""
+    from src.generator import generate_business
+    clients, invoices, expenses = generate_business(seed=seed, mode=mode)
+    return Dataset(clients, invoices, expenses, Settings(as_of, opening_cash, 0.0))
+
+
 # ---------- Engine: builds the pipeline once ----------
 class Engine:
     def __init__(self, dataset=None):
-        self.ds = dataset or generate_business()
+        self.ds = dataset or default_dataset()
         self.rebuild()
 
     def rebuild(self):
@@ -25,21 +38,37 @@ class Engine:
         inv = ds.invoices.copy()
         for c in ("issue_date", "due_date", "paid_date"):
             inv[c] = pd.to_datetime(inv[c])
+        inv = inv[inv["issue_date"] <= self.as_of].reset_index(drop=True)   # nothing issued after as_of is known
+        paid = inv["paid_date"].notna() & (inv["paid_date"] <= self.as_of)
+        inv.loc[~paid, "paid_date"] = pd.NaT                                 # hide payments after as_of
         self.inv = inv
 
-        paid = inv["paid_date"].notna()
-        age = (self.as_of - inv["issue_date"]).dt.days.clip(lower=0)
-        T = np.where(paid, (inv["paid_date"] - inv["issue_date"]).dt.days, age)
-        E = paid.astype(int).values
+        # Dev A's feature builder returns features + right-censored targets in one call
+        X, T, E, meta = build_features(inv, ds.clients, self.as_of)
+        T = np.maximum(np.asarray(T, dtype=float), 1.0)
+        E = np.asarray(E).astype(int)
+        self.model = DelayModel().fit(X, T, E)
 
-        X_all = build_features(inv)
-        self.model = DelayModel().fit(X_all, T, E)
-
-        self.open_inv = inv[~paid].reset_index(drop=True)
+        # Open (unpaid) invoices are the censored rows (E == 0). Align them by invoice_id.
+        if isinstance(meta, pd.DataFrame) and "invoice_id" in meta.columns:
+            ids = meta["invoice_id"].astype(str).values
+        elif len(inv) == len(E):
+            ids = inv["invoice_id"].astype(str).values
+        else:
+            raise ValueError("build_features returned a different number of rows than the invoices "
+                             "and no invoice_id column to align them.")
+        open_mask = E == 0
+        open_rows = np.where(open_mask)[0]
+        by_id = inv.assign(invoice_id=inv["invoice_id"].astype(str)).set_index("invoice_id")
+        self.open_inv = by_id.loc[ids[open_rows]].reset_index()
         self.s_obs = (self.as_of - self.open_inv["issue_date"]).dt.days.clip(lower=0).values
-        X_open = build_features(self.open_inv)
-        rng = np.random.default_rng(SEED)
-        self.samples = self.model.sample(X_open, self.s_obs, N_SIMS, rng)
+
+        if len(open_rows):
+            X_open = X.iloc[open_rows] if hasattr(X, "iloc") else X[open_rows]
+            rng = np.random.default_rng(SEED)
+            self.samples = self.model.sample(X_open, self.s_obs, N_SIMS, rng)
+        else:
+            self.samples = np.zeros((N_SIMS, 0))
 
         self.sim = simulate_cash(self.open_inv, self.samples, ds.expenses,
                                  ds.settings.opening_cash_pkr,
@@ -47,8 +76,7 @@ class Engine:
                                  buffer=ds.settings.min_buffer_pkr)
 
     def day_to_date(self, day_idx):
-        return (self.as_of + pd.Timedelta(days=int(day_idx) + 1)).strftime("%Y-%m-%d")
-
+        return (self.as_of + pd.Timedelta(int(day_idx) + 1, unit="D")).strftime("%Y-%m-%d")
 
 _engine = None
 
@@ -135,7 +163,7 @@ def get_invoice(invoice_id: str) -> dict:
     row = e.open_inv.loc[i]
     t = e.samples[:, i]
     q10, q50, q90 = np.percentile(t, [10, 50, 90])
-    to_date = lambda d: (row["issue_date"] + pd.Timedelta(days=float(d))).strftime("%Y-%m-%d")
+    to_date = lambda d: (row["issue_date"] + pd.Timedelta(float(d), unit="D")).strftime("%Y-%m-%d")
     terms = (row["due_date"] - row["issue_date"]).days
     return {
         "invoice_id": invoice_id,
