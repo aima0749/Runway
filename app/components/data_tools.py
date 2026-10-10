@@ -27,25 +27,30 @@ def template_csv(name: str) -> str:
     w.writerows(rows)
     return buf.getvalue()
 
+import json
+import tempfile
+from dataclasses import asdict
+from pathlib import Path
+
+
+def _bytes(f):
+    return f.getvalue() if hasattr(f, "getvalue") else f.read()
+
 
 def validate_upload(clients_file, invoices_file, expenses_file, settings):
-    """-> (Dataset or None, list of plain-language errors).
-    NOTE: adjust the load_and_validate call below if Dev A's real signature differs."""
+    """-> (Dataset or None, list of plain-language errors). Uses Dev A's validator on a temp folder."""
     from src.data import load_and_validate
     try:
-        files = {"clients": pd.read_csv(clients_file),
-                 "invoices": pd.read_csv(invoices_file),
-                 "expenses": pd.read_csv(expenses_file)}
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            for name, f in (("clients.csv", clients_file), ("invoices.csv", invoices_file),
+                            ("expenses.csv", expenses_file)):
+                (folder / name).write_bytes(_bytes(f))
+            (folder / "settings.json").write_text(json.dumps(asdict(settings)), encoding="utf-8")
+            ds, errors = load_and_validate(folder, folder / "settings.json")
     except Exception as ex:
-        return None, [f"I could not read one of the files as a CSV: {ex}"]
-    try:
-        result = load_and_validate(files, settings)
-    except Exception as ex:
-        return None, [f"The files could not be validated: {ex}"]
-    if isinstance(result, tuple):
-        ds, errors = result[0], list(result[1] or [])
-    else:
-        ds, errors = result, []
+        return None, [f"The files could not be read: {ex}"]
+    errors = list(errors or [])
     if errors or ds is None or not hasattr(ds, "settings"):
         return None, errors or ["The files could not be validated."]
     return ds, []

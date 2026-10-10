@@ -3,6 +3,7 @@ from dataclasses import asdict
 import re
 import numpy as np
 import pandas as pd
+from src.tidy import tidy_expenses
 
 from config import SEED, N_SIMS, CHASE_TOP_N, LANGS, TONES
 from src.schemas import Dataset, Settings
@@ -14,9 +15,13 @@ from src.messages import draft_reminder as _draft
 
 
 def default_dataset():
-    """The scripted 'Ayesha Studio' demo scenario (Dev A's scenario_ayesha.py)."""
-    from src.scenario_ayesha import make_ayesha_dataset
-    return make_ayesha_dataset()
+       """The scripted 'Ayesha Studio' demo scenario (Dev A's scenario_ayesha.py)."""
+       from config import DEMO_OPENING_CASH
+       from src.scenario_ayesha import make_ayesha_dataset
+       ds = make_ayesha_dataset()
+       if DEMO_OPENING_CASH is not None:
+           ds.settings.opening_cash_pkr = float(DEMO_OPENING_CASH)
+       return ds
 
 
 def synthetic_dataset(seed=0, mode="easy", as_of="2025-06-30", opening_cash=500000.0):
@@ -34,6 +39,7 @@ class Engine:
 
     def rebuild(self):
         ds = self.ds
+        ds.expenses, self.data_notes = tidy_expenses(ds.expenses)  
         self.as_of = pd.Timestamp(ds.settings.as_of_date)
         inv = ds.invoices.copy()
         for c in ("issue_date", "due_date", "paid_date"):

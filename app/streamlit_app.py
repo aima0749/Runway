@@ -128,6 +128,8 @@ st.title("Runway Radar")
 st.caption(f"{st.session_state.get('active_scenario', scenario)} · as of {e.as_of:%d %b %Y} · "
            "committed money only: existing invoices and known expenses")
 
+for note in getattr(e, "data_notes", []):
+    st.info(note)
 tab_run, tab_inv, tab_act, tab_chat, tab_ev = st.tabs(
     ["Runway", "Invoices", "Actions", "Ask CFO", "Evidence"])
 

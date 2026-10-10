@@ -1,11 +1,8 @@
+streamlit
 pandas
 numpy
+plotly
 scipy
 scikit-learn
-plotly
-streamlit
-lifelines
-pydantic
-python-dotenv
-pytest
 groq
+python-dotenv
