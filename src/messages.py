@@ -11,8 +11,8 @@ _TEMPLATES = {
         "Hello {name}, this is a reminder that invoice {invoice_id} for {amount} was due on {due}. "
         "Please arrange payment at your earliest convenience. Thank you.",
     ("en", "final"):
-        "Hello {name}, invoice {invoice_id} for {amount}, due on {due}, is overdue. "
-        "Please arrange payment within 7 days. Thank you for your prompt attention.",
+        "Hello {name}, invoice {invoice_id} for {amount}, due on {due}, {overdue}. "
+        "Please arrange payment {deadline}. Thank you for your prompt attention.",
     ("ur", "friendly"):
         "Assalam o Alaikum {name}, umeed hai aap khairiyat se hain. Invoice {invoice_id} ki raqam "
         "{amount} {due} ko due thi. Meharbani karke is hafte tak payment bhej dein. Shukriya!",
@@ -21,7 +21,7 @@ _TEMPLATES = {
         "Meharbani karke jald payment ka intezam kar dein. Shukriya.",
     ("ur", "final"):
         "Assalam o Alaikum {name}, invoice {invoice_id} ki {amount} raqam, jis ki due date {due} thi, "
-        "ab overdue hai. Meharbani karke 7 din ke andar payment bhej dein. Shukriya.",
+        "ab {overdue}. Meharbani karke {deadline} payment bhej dein. Shukriya.",
 }
 
 
@@ -47,4 +47,26 @@ def draft_reminder(client: str, invoice: dict, tone: str = "friendly", lang: str
         "amount": f"Rs {float(invoice['amount_pkr']):,.0f}",
         "due": f"{due_date.day} {due_date.strftime('%b %Y')}",
     }
+    if tone == "final":
+        overdue = "is overdue" if lang == "en" else "overdue hai"
+        days_overdue = invoice.get("days_overdue")
+        if isinstance(days_overdue, int) and not isinstance(days_overdue, bool) and days_overdue >= 0:
+            if lang == "en":
+                unit = "day" if days_overdue == 1 else "days"
+                overdue = f"is {days_overdue} {unit} overdue"
+            else:
+                overdue = f"{days_overdue} din overdue hai"
+
+        deadline = "within 7 days" if lang == "en" else "7 din ke andar"
+        pay_by = invoice.get("pay_by")
+        if isinstance(pay_by, str):
+            try:
+                pay_by_date = datetime.strptime(pay_by, "%Y-%m-%d")
+            except ValueError:
+                pass
+            else:
+                formatted_pay_by = pay_by_date.strftime("%d %b %Y")
+                deadline = f"by {formatted_pay_by}" if lang == "en" else f"{formatted_pay_by} tak"
+        values.update(overdue=overdue, deadline=deadline)
+
     return _TEMPLATES[(lang, tone)].format_map(values)
