@@ -1,10 +1,11 @@
 """Agent tools. Pure functions, JSON in / JSON out. The LLM never calculates; it calls these."""
 from dataclasses import asdict
+import re
 import numpy as np
 import pandas as pd
 
 from config import SEED, N_SIMS, CHASE_TOP_N, LANGS, TONES
-from src.generator import generate_business
+from src.schemas import Dataset, Settings
 from src.features import build_features
 from src.delay_model import DelayModel
 from src.simulate import simulate_cash
@@ -12,10 +13,23 @@ from src import decisions
 from src.messages import draft_reminder as _draft
 
 
+def default_dataset():
+    """The scripted 'Ayesha Studio' demo scenario (Dev A's scenario_ayesha.py)."""
+    from src.scenario_ayesha import make_ayesha_dataset
+    return make_ayesha_dataset()
+
+
+def synthetic_dataset(seed=0, mode="easy", as_of="2025-06-30", opening_cash=500000.0):
+    """Wrap Dev A's generator (3 DataFrames) into a Dataset."""
+    from src.generator import generate_business
+    clients, invoices, expenses = generate_business(seed=seed, mode=mode)
+    return Dataset(clients, invoices, expenses, Settings(as_of, opening_cash, 0.0))
+
+
 # ---------- Engine: builds the pipeline once ----------
 class Engine:
     def __init__(self, dataset=None):
-        self.ds = dataset or generate_business()
+        self.ds = dataset or default_dataset()
         self.rebuild()
 
     def rebuild(self):
@@ -24,21 +38,37 @@ class Engine:
         inv = ds.invoices.copy()
         for c in ("issue_date", "due_date", "paid_date"):
             inv[c] = pd.to_datetime(inv[c])
+        inv = inv[inv["issue_date"] <= self.as_of].reset_index(drop=True)   # nothing issued after as_of is known
+        paid = inv["paid_date"].notna() & (inv["paid_date"] <= self.as_of)
+        inv.loc[~paid, "paid_date"] = pd.NaT                                 # hide payments after as_of
         self.inv = inv
 
-        paid = inv["paid_date"].notna()
-        age = (self.as_of - inv["issue_date"]).dt.days.clip(lower=0)
-        T = np.where(paid, (inv["paid_date"] - inv["issue_date"]).dt.days, age)
-        E = paid.astype(int).values
+        # Dev A's feature builder returns features + right-censored targets in one call
+        X, T, E, meta = build_features(inv, ds.clients, self.as_of)
+        T = np.maximum(np.asarray(T, dtype=float), 1.0)
+        E = np.asarray(E).astype(int)
+        self.model = DelayModel().fit(X, T, E)
 
-        X_all = build_features(inv)
-        self.model = DelayModel().fit(X_all, T, E)
-
-        self.open_inv = inv[~paid].reset_index(drop=True)
+        # Open (unpaid) invoices are the censored rows (E == 0). Align them by invoice_id.
+        if isinstance(meta, pd.DataFrame) and "invoice_id" in meta.columns:
+            ids = meta["invoice_id"].astype(str).values
+        elif len(inv) == len(E):
+            ids = inv["invoice_id"].astype(str).values
+        else:
+            raise ValueError("build_features returned a different number of rows than the invoices "
+                             "and no invoice_id column to align them.")
+        open_mask = E == 0
+        open_rows = np.where(open_mask)[0]
+        by_id = inv.assign(invoice_id=inv["invoice_id"].astype(str)).set_index("invoice_id")
+        self.open_inv = by_id.loc[ids[open_rows]].reset_index()
         self.s_obs = (self.as_of - self.open_inv["issue_date"]).dt.days.clip(lower=0).values
-        X_open = build_features(self.open_inv)
-        rng = np.random.default_rng(SEED)
-        self.samples = self.model.sample(X_open, self.s_obs, N_SIMS, rng)
+
+        if len(open_rows):
+            X_open = X.iloc[open_rows] if hasattr(X, "iloc") else X[open_rows]
+            rng = np.random.default_rng(SEED)
+            self.samples = self.model.sample(X_open, self.s_obs, N_SIMS, rng)
+        else:
+            self.samples = np.zeros((N_SIMS, 0))
 
         self.sim = simulate_cash(self.open_inv, self.samples, ds.expenses,
                                  ds.settings.opening_cash_pkr,
@@ -46,8 +76,7 @@ class Engine:
                                  buffer=ds.settings.min_buffer_pkr)
 
     def day_to_date(self, day_idx):
-        return (self.as_of + pd.Timedelta(days=int(day_idx) + 1)).strftime("%Y-%m-%d")
-
+        return (self.as_of + pd.Timedelta(int(day_idx) + 1, unit="D")).strftime("%Y-%m-%d")
 
 _engine = None
 
@@ -93,14 +122,23 @@ def run_what_if(change: dict) -> dict:
     t = (change or {}).get("type")
     if t not in WHAT_IF_TYPES:
         return {"error": f"Unknown change type '{t}'. Use one of {sorted(WHAT_IF_TYPES)}."}
-    res = decisions.run_what_if(get_engine(), change)
-    res = dict(res)
+    e = get_engine()
+    res = dict(decisions.run_what_if(e, change))
     res["change"] = change
     res["p_before_pct"] = _pct(res["p_before"])
     res["p_after_pct"] = _pct(res["p_after"])
     res["status_after"] = decisions.status(res["p_after"])
+    start = change.get("start") or change.get("due_date")
+    if start:
+        try:
+            offset = (pd.Timestamp(start) - e.as_of).days
+            horizon = int(e.sim.paths.shape[1])
+            if offset > horizon:
+                res["warning"] = (f"This starts {offset} days from now, beyond the {horizon}-day "
+                                  "forecast window, so it is not reflected in these numbers.")
+        except Exception:
+            pass
     return res
-
 
 # ---------- Tool 3 ----------
 def rank_chase(top_n: int = CHASE_TOP_N) -> dict:
@@ -125,7 +163,7 @@ def get_invoice(invoice_id: str) -> dict:
     row = e.open_inv.loc[i]
     t = e.samples[:, i]
     q10, q50, q90 = np.percentile(t, [10, 50, 90])
-    to_date = lambda d: (row["issue_date"] + pd.Timedelta(days=float(d))).strftime("%Y-%m-%d")
+    to_date = lambda d: (row["issue_date"] + pd.Timedelta(float(d), unit="D")).strftime("%Y-%m-%d")
     terms = (row["due_date"] - row["issue_date"]).days
     return {
         "invoice_id": invoice_id,
@@ -152,16 +190,65 @@ def draft_reminder(invoice_id: str, lang: str = "en", tone: str = "friendly") ->
     e = get_engine()
     name_row = e.ds.clients[e.ds.clients["client_id"] == inv["client_id"]]
     client = name_row["name"].iloc[0] if len(name_row) else inv["client_id"]
-    text = _draft(client, inv, tone, lang)
-    return {"invoice_id": invoice_id, "lang": lang, "tone": tone, "message": text}
+    days_late = max(0, (e.as_of - pd.Timestamp(inv["due_date"])).days)
+    pay_by = (e.as_of + pd.Timedelta(7, unit="D")).strftime("%Y-%m-%d")
+    payload = dict(inv, days_late=days_late, days_overdue=days_late, pay_by=pay_by)
+    text = _draft(client, payload, tone, lang)
+    return {"invoice_id": invoice_id, "lang": lang, "tone": tone, "message": text,
+            "days_overdue": days_late, "pay_by": pay_by}
 
 
 # ---------- Tool 6 (real logic comes in Step 6) ----------
+def _parser_llm():
+    """Real LLM if available; None means rules-only parsing."""
+    try:
+        from src.agent import get_llm
+        llm = get_llm()
+        return None if llm.name == "mock" else llm
+    except Exception:
+        return None
+
+
 def add_invoice_from_text(text: str) -> dict:
-    """STUB: parser.py arrives in Step 6. Never saves; the user must confirm first."""
-    return {"status": "needs_confirmation",
-            "parsed": {"client": None, "amount_pkr": None, "due_date": None},
-            "note": "Parser not implemented yet."}
+    """Proposes an invoice. NEVER saves. Saving happens in save_invoice() after the user confirms."""
+    from src.parser import parse_invoice_text
+    e = get_engine()
+    return parse_invoice_text(text, e.ds.clients, e.as_of, llm=_parser_llm())
+
+
+def _next_id(series, prefix):
+    nums = [int(m.group(1)) for s in series.astype(str) if (m := re.match(rf"{prefix}(\d+)$", s))]
+    return f"{prefix}{max(nums, default=0) + 1}"
+
+
+def save_invoice(parsed: dict) -> dict:
+    """Called only by the UI after the owner clicks Confirm. NOT in TOOLS, so the LLM cannot call it."""
+    e = get_engine()
+    ds = e.ds
+    try:
+        amount = float(parsed["amount_pkr"])
+        due = pd.Timestamp(parsed["due_date"])
+        issue = pd.Timestamp(parsed.get("issue_date") or e.as_of)
+    except Exception:
+        return {"error": "The invoice details are incomplete."}
+    if amount <= 0 or due < issue:
+        return {"error": "The amount must be positive and the due date cannot be before the issue date."}
+    client_id = parsed.get("client_id")
+    if not client_id:
+        name = (parsed.get("client_name") or "").strip()
+        if not name:
+            return {"error": "The client name is missing."}
+        client_id = _next_id(ds.clients["client_id"], "C")
+        new = pd.DataFrame([{"client_id": client_id, "name": name, "segment": "sme"}])
+        ds.clients = pd.concat([ds.clients, new], ignore_index=True)
+    inv_id = _next_id(ds.invoices["invoice_id"], "INV")
+    row = pd.DataFrame([{"invoice_id": inv_id, "client_id": client_id,
+                         "issue_date": issue.strftime("%Y-%m-%d"), "due_date": due.strftime("%Y-%m-%d"),
+                         "amount_pkr": amount, "paid_date": None}])
+    ds.invoices = pd.concat([ds.invoices, row], ignore_index=True)
+    e.rebuild()
+    return {"saved": True, "invoice_id": inv_id, "client_id": client_id,
+            "p_shortfall_pct": _pct(e.sim.p_shortfall)}
 
 
 # ---------- Registry + schemas for the LLM ----------

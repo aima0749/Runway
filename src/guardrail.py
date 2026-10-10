@@ -225,6 +225,12 @@ def fallback_answer(trace: list, lang: str = "en") -> str:
     if tool == "draft_reminder":
         return r.get("message", "")
     if tool == "add_invoice_from_text":
-        return ("Maine invoice samajh liya hai. Save karne se pehle please confirm karein." if ur else
-                "I extracted an invoice. Please confirm it before it is saved.")
+        p = r.get("parsed") or {}
+        if r.get("problems"):
+            return ("Invoice poori tarah samajh nahi aaya: " if ur else "I could not read that invoice fully: ") + "; ".join(r["problems"])
+        if ur:
+            return (f"Invoice mila: {p.get('client_name')}, Rs {p.get('amount_pkr'):,.0f}, "
+                    f"aakhri tareekh {p.get('due_date')}. Save karne se pehle please confirm karein.")
+        return (f"I found an invoice for {p.get('client_name')}: Rs {p.get('amount_pkr'):,.0f}, "
+                f"due {p.get('due_date')}. Please confirm before it is saved.")   
     return "Please check the tool details below." if not ur else "Tafseelat neeche dekh lein."

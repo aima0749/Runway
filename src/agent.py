@@ -5,6 +5,7 @@ import re
 from dotenv import load_dotenv
 
 from config import MAX_AGENT_STEPS
+from src import tools
 from src.tools import TOOL_SCHEMAS, call_tool, get_engine
 from src.guardrail import verify_answer, fallback_answer, detect_lang
 
@@ -27,7 +28,8 @@ RULES
 6. Keep answers short: 2 to 4 sentences, plain words, no jargon. Then suggest one next step, such as chasing an invoice or drafting a reminder.
 7. Use percentages as given (for example 68%) and amounts as 'Rs 60,000'.
 8. Never save an invoice. add_invoice_from_text only proposes; the user must confirm.
-9. Do not give yes/no verdicts such as "safe" or "not affordable". State the risk change and the status label, and let the owner decide.
+9. Do not give yes/no verdicts such as "safe" or "not affordable". State the risk change and the status, and let the owner decide.
+10. If a tool result contains a "warning", tell the user about it in plain words. If an invoice proposal has problems or warnings, mention them and ask the user to confirm or correct before anything is saved.
 """
 
 
@@ -50,10 +52,10 @@ class GroqLLM:
         self.client = Groq(api_key=self.api_key)
 
     def chat(self, messages, tools):
-        resp = self.client.chat.completions.create(
-            model=self.model, messages=messages, tools=tools,
-            tool_choice="auto", temperature=0, max_tokens=2000,
-        )
+        kwargs = dict(model=self.model, messages=messages, temperature=0, max_tokens=2000)
+        if tools:
+            kwargs.update(tools=tools, tool_choice="auto")
+        resp = self.client.chat.completions.create(**kwargs)
         msg = resp.choices[0].message
         calls = []
         for tc in (msg.tool_calls or []):
@@ -75,6 +77,8 @@ class MockLLM:
             return {"content": self._summarize(messages), "tool_calls": []}
 
         text = last["content"].lower()
+        if any(k in text for k in ("dena hai", "dena he", "owes", "owe me")):
+           return self._call("add_invoice_from_text", {"text": last["content"]})
         if any(k in text for k in ("hire", "salary", "afford", "rakh")):
             m = re.search(r"(\d[\d,]*)\s*(k)?", text)
             amount = 60000.0
@@ -102,8 +106,12 @@ class MockLLM:
         idx = max(i for i, m in enumerate(messages) if m["role"] == "user")
         results = [json.loads(m["content"]) for m in messages[idx:] if m["role"] == "tool"]
         r = results[-1]
-        if "error" in r:
-            return f"Sorry, that did not work: {r['error']}"
+        if "parsed" in r:
+            p = r["parsed"]
+            if r["problems"]:
+                return "I could not read that invoice fully: " + "; ".join(r["problems"])
+            return (f"I found an invoice for {p['client_name']}: Rs {p['amount_pkr']:,.0f}, "
+                    f"due {p['due_date']}. Please confirm before I save it.")
         if "p_after_pct" in r:
             return (f"Your risk of running short would go from {r['p_before_pct']}% "
                     f"to {r['p_after_pct']}%. Check whether you can absorb that before committing.")
