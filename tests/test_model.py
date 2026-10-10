@@ -31,6 +31,30 @@ def test_sampled_durations_are_strictly_after_observed_age() -> None:
     assert (samples > np.maximum(ages, 0.5)[None, :]).all()
 
 
+def test_public_consumer_calls_and_seeded_sampling_are_stable() -> None:
+    X, T, E = _aft_data(seed=23, n=200)
+    model = DelayModel().fit(X, T, E)
+
+    mu = model.predict_mu(X.iloc[:5])
+    first = model.sample(X.iloc[:5], np.full(5, 2.0), n=20, rng=np.random.default_rng(91))
+    second = model.sample(X.iloc[:5], np.full(5, 2.0), n=20, rng=np.random.default_rng(91))
+
+    assert mu.shape == (5,)
+    assert first.shape == (20, 5)
+    np.testing.assert_array_equal(first, second)
+
+
+def test_prediction_imputation_uses_training_means() -> None:
+    X = pd.DataFrame({"history": [1.0, np.nan, 5.0, 7.0], "amount": [10.0, 20.0, 30.0, 40.0]})
+    T = np.array([4.0, 6.0, 9.0, 12.0])
+    E = np.ones(4, dtype=int)
+    model = DelayModel().fit(X, T, E)
+    missing_row = pd.DataFrame({"history": [np.nan], "amount": [25.0]})
+    training_mean_row = pd.DataFrame({"history": [model.impute_means_[0]], "amount": [25.0]})
+
+    np.testing.assert_allclose(model.predict_mu(missing_row), model.predict_mu(training_mean_row))
+
+
 def test_fit_completes_quickly_on_about_one_thousand_invoices() -> None:
     X, T, E = _aft_data(n=1000)
     started = time.perf_counter()

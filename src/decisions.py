@@ -8,14 +8,14 @@ def status(p: float) -> str:
         return "amber"
     return "red"
 
-def rank_chase(dataset=None, top_n=10) -> list:
+def rank_chase(engine=None, top_n=10) -> list:
     """STUB (Dev B): dummy ranked list."""
     return [
         ChaseRow("INV3", "Client One", 300000.0, 0.68, 0.31, 0.37),
         ChaseRow("INV2", "Client Two", 150000.0, 0.68, 0.55, 0.13),
     ][:top_n]
 
-def run_what_if(dataset=None, change=None) -> dict:
+def run_what_if(engine=None, change=None) -> dict:
     """STUB (Dev B): dummy before/after."""
     return {"p_before": 0.68, "p_after": 0.81, "min_cash_p50_before": -50000.0,
             "min_cash_p50_after": -110000.0}

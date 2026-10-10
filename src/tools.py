@@ -41,7 +41,9 @@ class Engine:
         self.samples = self.model.sample(X_open, self.s_obs, N_SIMS, rng)
 
         self.sim = simulate_cash(self.open_inv, self.samples, ds.expenses,
-                                 ds.settings.opening_cash_pkr)
+                                 ds.settings.opening_cash_pkr,
+                                 as_of=self.as_of, s_obs=self.s_obs,
+                                 buffer=ds.settings.min_buffer_pkr)
 
     def day_to_date(self, day_idx):
         return (self.as_of + pd.Timedelta(days=int(day_idx) + 1)).strftime("%Y-%m-%d")
@@ -92,7 +94,7 @@ def run_what_if(change: dict) -> dict:
     t = (change or {}).get("type")
     if t not in WHAT_IF_TYPES:
         return {"error": f"Unknown change type '{t}'. Use one of {sorted(WHAT_IF_TYPES)}."}
-    res = decisions.run_what_if(get_engine().ds, change)
+    res = decisions.run_what_if(get_engine(), change)
     res = dict(res)
     res["change"] = change
     res["p_before_pct"] = _pct(res["p_before"])
@@ -104,7 +106,7 @@ def run_what_if(change: dict) -> dict:
 # ---------- Tool 3 ----------
 def rank_chase(top_n: int = CHASE_TOP_N) -> dict:
     top_n = max(1, min(int(top_n), 10))
-    rows = decisions.rank_chase(get_engine().ds, top_n)
+    rows = decisions.rank_chase(get_engine(), top_n)
     out = []
     for r in rows:
         d = asdict(r)
