@@ -15,8 +15,10 @@ from app.components.chat_ui import render_chat
 from app.components.charts import fan_chart, shortfall_chart
 from app.components.data_tools import TEMPLATE_NAMES, template_csv, validate_upload
 from app.components.evidence import render_evidence
+from app.components.theme import apply_theme, hero
 
 st.set_page_config(page_title="Runway Radar", page_icon="📡", layout="wide")
+apply_theme()
 
 AYESHA = "Ayesha Studio (scripted demo)"
 EASY = "Synthetic business (easy)"
@@ -124,9 +126,9 @@ e = tools.get_engine()
 runway = tools.call_tool("get_runway")
 names = dict(zip(e.ds.clients["client_id"].astype(str), e.ds.clients["name"]))
 
-st.title("Runway Radar")
-st.caption(f"{st.session_state.get('active_scenario', scenario)} · as of {e.as_of:%d %b %Y} · "
-           "committed money only: existing invoices and known expenses")
+hero("📡 Runway Radar", "Know the day the cash runs out, before it does.",
+     chip=f"{st.session_state.get('active_scenario', scenario)} · as of {e.as_of:%d %b %Y} · "
+          "committed money only")
 
 for note in getattr(e, "data_notes", []):
     st.info(note)
