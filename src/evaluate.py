@@ -362,7 +362,7 @@ def _run_shortfall_fold(
 
 
 def backtest(
-    seeds: Iterable[int] = range(25),
+    seeds: Iterable[int] = range(SEED, SEED + 25),
     as_of_dates: Iterable[str] = DEFAULT_AS_OF_DATES,
     modes: Iterable[str] = ("easy", "hard"),
     n_clients: int = 25,

@@ -68,7 +68,7 @@ def load_and_validate(
         min_buffer = float(raw_settings.get("min_buffer_pkr", 0.0))
         if opening_cash < 0 or min_buffer < 0:
             raise ValueError("cash settings must be nonnegative")
-    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, KeyError, TypeError, ValueError) as exc:
         errors.append(f"Invalid settings: {exc}")
         as_of, opening_cash, min_buffer = "1970-01-01", 0.0, 0.0
 
