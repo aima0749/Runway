@@ -42,10 +42,10 @@ HISTORICAL_DELAY = {"AY001": 21, "AY002": 28, "AY003": 13}
 SMALL_CLIENTS = tuple(client[0] for client in CLIENTS[3:])
 OPEN_ROWS = (
     ("AY003", "2025-01-15", 30, 500_000.0, 13),
-    ("AY001", "2025-01-20", 30, 100_000.0, 21),
+    ("AY004", "2025-01-18", 30, 100_000.0, 2),
     ("AY002", "2025-01-21", 30, 80_000.0, 28),
     ("AY002", "2025-01-25", 30, 70_000.0, 28),
-    ("AY003", "2025-01-25", 30, 50_000.0, 13),
+    ("AY005", "2025-01-25", 30, 50_000.0, 2),
 )
 EXPENSE_AMOUNTS = {"rent": 60_000.0, "salaries": 300_000.0, "suppliers": 60_000.0}
 EXPENSE_DAYS = {"rent": 1, "salaries": 20, "suppliers": 25}
@@ -131,7 +131,7 @@ def make_ayesha_dataset() -> Dataset:
         expense_number += 1
 
     expense_table = pd.DataFrame(expenses, columns=EXPENSE_COLUMNS)
-    opening_cash = 299_000.0
+    opening_cash = 299_500.0
     return Dataset(
         clients=clients,
         invoices=invoice_table,
@@ -363,6 +363,8 @@ def sweep_opening_cash() -> None:
     print("cash_pkr | risk_pct | min_cash_p50_pkr | cash_out_p50 | chased_risk_pct")
     cash_values = list(range(250_000, 297_501, 2_500))
     cash_values.extend(range(298_000, 300_001, 500))
+    cash_values.extend(range(299_550, 300_001, 50))
+    cash_values.extend(range(301_000, 330_001, 1_000))
     for cash in cash_values:
         result = simulate_cash(
             open_invoices, samples, expenses, float(cash), AS_OF_DATE, age_open,
