@@ -53,9 +53,9 @@ def draft_reminder(client: str, invoice: dict, tone: str = "friendly", lang: str
         if isinstance(days_overdue, int) and not isinstance(days_overdue, bool) and days_overdue >= 0:
             if lang == "en":
                 unit = "day" if days_overdue == 1 else "days"
-                overdue = f"{days_overdue} {unit} overdue"
+                overdue = f"is {days_overdue} {unit} overdue"
             else:
-                overdue = f"{days_overdue} din overdue"
+                overdue = f"{days_overdue} din overdue hai"
 
         deadline = "within 7 days" if lang == "en" else "7 din ke andar"
         pay_by = invoice.get("pay_by")

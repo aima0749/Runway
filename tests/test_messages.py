@@ -67,8 +67,8 @@ def test_every_message_is_under_600_characters(lang, tone):
 @pytest.mark.parametrize(
     ("lang", "expected_overdue", "expected_deadline"),
     [
-        ("en", "3 days overdue", "by 27 Oct 2026"),
-        ("ur", "3 din overdue", "27 Oct 2026 tak"),
+        ("en", "is 3 days overdue", "by 27 Oct 2026"),
+        ("ur", "3 din overdue hai", "27 Oct 2026 tak"),
     ],
 )
 def test_final_tone_uses_both_valid_optional_values(lang, expected_overdue, expected_deadline):
@@ -84,8 +84,8 @@ def test_final_tone_uses_both_valid_optional_values(lang, expected_overdue, expe
 @pytest.mark.parametrize(
     ("lang", "expected_overdue", "fallback_deadline"),
     [
-        ("en", "3 days overdue", "within 7 days"),
-        ("ur", "3 din overdue", "7 din ke andar"),
+        ("en", "is 3 days overdue", "within 7 days"),
+        ("ur", "3 din overdue hai", "7 din ke andar"),
     ],
 )
 def test_final_tone_with_only_days_overdue(lang, expected_overdue, fallback_deadline):
@@ -158,5 +158,5 @@ def test_final_tone_uses_singular_day(lang):
         "Ayesha Khan", {**INVOICE, "days_overdue": 1}, tone="final", lang=lang
     )
 
-    assert ("1 day overdue" if lang == "en" else "1 din overdue") in message
+    assert ("is 1 day overdue" if lang == "en" else "1 din overdue hai") in message
     assert len(message) < 600
