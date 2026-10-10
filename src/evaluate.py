@@ -323,9 +323,9 @@ def _run_shortfall_fold(
     due_samples = np.repeat(due_durations[None, :], model_draws.shape[0], axis=0)
     average_samples = np.repeat(np.maximum(average_durations, age + 1.0)[None, :], model_draws.shape[0], axis=0)
     simulator_results = {
-        "model": simulate_cash(open_invoices, model_draws, future_expenses, opening_cash, horizon=horizon, seed=SEED + seed),
-        "due_date": simulate_cash(open_invoices, due_samples, future_expenses, opening_cash, horizon=horizon, seed=SEED + seed),
-        "client_average": simulate_cash(open_invoices, average_samples, future_expenses, opening_cash, horizon=horizon, seed=SEED + seed),
+        "model": simulate_cash(open_invoices, model_draws, future_expenses, opening_cash, as_of, age, horizon=horizon, seed=SEED + seed),
+        "due_date": simulate_cash(open_invoices, due_samples, future_expenses, opening_cash, as_of, age, horizon=horizon, seed=SEED + seed),
+        "client_average": simulate_cash(open_invoices, average_samples, future_expenses, opening_cash, as_of, age, horizon=horizon, seed=SEED + seed),
     }
 
     base_rate = _historical_shortfall_rate(invoices, expenses, train_as_of, horizon)
