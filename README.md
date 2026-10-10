@@ -14,7 +14,7 @@
 
 **AICON'26 · Build With AI · Team HackTech · Domain: Financial Operations**
 
-### 🔴 [Live demo](https://runway-sdkfulnpzabchbixh6kdvq.streamlit.app/) · 💻 [GitHub](https://github.com/aima0749/Runway) · 📊 Slides: `[add link or file name]`
+### 🔴 [Live demo](https://runway-sdkfulnpzabchbixh6kdvq.streamlit.app/) · 💻 [GitHub](https://github.com/aima0749/Runway) 
 
 </div>
 
