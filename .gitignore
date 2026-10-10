@@ -2,4 +2,4 @@
 __pycache__/
 .venv/
 *.pyc
-.streamlit/secrets.toml
+.streamlit/secrets.tomlscratch_sweep.py
