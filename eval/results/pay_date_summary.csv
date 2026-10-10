@@ -1,0 +1,17 @@
+mode,cohort,method,folds,n_invoices,mae_days,coverage_p10_p90
+easy,cold_start,client_average,8,50,19.20171130952381,
+easy,cold_start,client_bootstrap,8,50,19.967311507936508,
+easy,cold_start,due_date,8,50,26.5530753968254,
+easy,cold_start,model,8,50,68.5474954358451,0.3997519841269841
+easy,not_cold_start,client_average,32,1595,10.727390967072035,
+easy,not_cold_start,client_bootstrap,32,1595,10.632866737902402,
+easy,not_cold_start,due_date,32,1595,20.30539194790787,
+easy,not_cold_start,model,32,1595,28.59268891095698,0.6998585648730695
+hard,cold_start,client_average,8,103,35.663024796894284,
+hard,cold_start,client_bootstrap,8,103,37.55701028954705,
+hard,cold_start,due_date,8,103,48.584683657845424,
+hard,cold_start,model,8,103,122.19810106266681,0.3894410022167375
+hard,not_cold_start,client_average,32,1787,22.69194041746828,
+hard,not_cold_start,client_bootstrap,32,1787,23.876601454053976,
+hard,not_cold_start,due_date,32,1787,33.81430758745204,
+hard,not_cold_start,model,32,1787,52.893937447435384,0.6592187144777097
