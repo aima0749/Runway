@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 
 from config import MAX_AGENT_STEPS
 from src.tools import TOOL_SCHEMAS, call_tool, get_engine
+from src.guardrail import verify_answer, fallback_answer, detect_lang
 
 load_dotenv()
 
@@ -26,6 +27,7 @@ RULES
 6. Keep answers short: 2 to 4 sentences, plain words, no jargon. Then suggest one next step, such as chasing an invoice or drafting a reminder.
 7. Use percentages as given (for example 68%) and amounts as 'Rs 60,000'.
 8. Never save an invoice. add_invoice_from_text only proposes; the user must confirm.
+9. Do not give yes/no verdicts such as "safe" or "not affordable". State the risk change and the status label, and let the owner decide.
 """
 
 
@@ -128,16 +130,24 @@ def get_llm(force_mock: bool = False):
 
 
 # ---------------- The agent loop ----------------
+def _result(answer, trace, steps, ok, llm, g=None, retried=False, fallback=False):
+    return {"answer": answer, "tool_trace": trace, "steps": steps, "ok": ok, "llm": llm.name,
+            "verified": bool(g and g.ok), "numbers_checked": g.checked if g else 0,
+            "unverified": g.unverified if g else [], "retried": retried, "fallback": fallback}
+
+
 def run_agent(user_message: str, history: list | None = None, llm=None) -> dict:
     """history: list of {'role': 'user'|'assistant', 'content': str} from earlier turns."""
     llm = llm or get_llm()
     messages = [{"role": "system", "content": _system_prompt()}]
     messages += history or []
     messages.append({"role": "user", "content": user_message})
-    trace = []
+    trace, retried = [], False
+    extra_texts = [user_message, get_engine().as_of.strftime("%Y-%m-%d")] + \
+                  [h["content"] for h in (history or [])]
 
     for step in range(MAX_AGENT_STEPS):
-        reply = None
+        reply, last_err = None, None
         for attempt in range(2):                       # one retry on API hiccups
             try:
                 reply = llm.chat(messages, _openai_tools())
@@ -145,13 +155,25 @@ def run_agent(user_message: str, history: list | None = None, llm=None) -> dict:
             except Exception as ex:
                 last_err = ex
         if reply is None:
-            return {"answer": f"The AI service had a problem: {last_err}",
-                    "tool_trace": trace, "steps": step, "ok": False, "llm": llm.name}
+            return _result(f"The AI service had a problem: {last_err}", trace, step, False, llm)
 
         calls = reply["tool_calls"]
         if not calls:
-            return {"answer": reply["content"] or "", "tool_trace": trace,
-                    "steps": step + 1, "ok": True, "llm": llm.name}
+            answer = reply["content"] or ""
+            g = verify_answer(answer, trace, extra_texts)
+            if g.ok:
+                return _result(answer, trace, step + 1, True, llm, g, retried)
+            if not retried:                            # ask the LLM to fix itself once
+                retried = True
+                messages.append({"role": "assistant", "content": answer})
+                messages.append({"role": "user", "content":
+                    "Your answer contains values that do not appear in the tool results: "
+                    f"{', '.join(g.unverified)}. Rewrite it using only numbers from the tool "
+                    "results. If you need data, call a tool."})
+                continue
+            fb = fallback_answer(trace, detect_lang(user_message))
+            g2 = verify_answer(fb, trace, extra_texts)
+            return _result(fb, trace, step + 1, True, llm, g2, retried, fallback=True)
 
         messages.append({
             "role": "assistant", "content": reply["content"] or "",
@@ -164,8 +186,8 @@ def run_agent(user_message: str, history: list | None = None, llm=None) -> dict:
             trace.append({"tool": c["name"], "args": c["arguments"], "result": result})
             messages.append({"role": "tool", "tool_call_id": c["id"], "content": json.dumps(result)})
 
-    return {"answer": "I could not finish that. Please try a simpler question.",
-            "tool_trace": trace, "steps": MAX_AGENT_STEPS, "ok": False, "llm": llm.name}
+    return _result("I could not finish that. Please try a simpler question.",
+                   trace, MAX_AGENT_STEPS, False, llm)
 
 
 # ---------------- Terminal chat ----------------
@@ -181,4 +203,6 @@ if __name__ == "__main__":
         out = run_agent(q, history, llm)
         print("Tools:", [t["tool"] for t in out["tool_trace"]])
         print("CFO:", out["answer"])
+        print(f"[verified={out['verified']} checked={out['numbers_checked']} "
+              f"retried={out['retried']} fallback={out['fallback']}]")
         history += [{"role": "user", "content": q}, {"role": "assistant", "content": out["answer"]}]

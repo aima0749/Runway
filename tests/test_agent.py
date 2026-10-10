@@ -1,3 +1,6 @@
+import json
+
+
 from src.agent import run_agent, MockLLM
 
 
@@ -43,3 +46,34 @@ def test_step_limit():
 def test_llm_failure_does_not_crash():
     out = run_agent("hello", llm=BrokenLLM())
     assert not out["ok"] and "problem" in out["answer"]
+
+def _tool_call():
+    return {"content": None, "tool_calls": [{"id": "a", "name": "get_runway", "arguments": {}}]}
+
+class LiarLLM:
+    name = "liar"
+    def chat(self, messages, tools):
+        if not any(m["role"] == "tool" for m in messages):
+            return _tool_call()
+        return {"content": "You have a 99% chance of running short.", "tool_calls": []}
+
+class FixesItself:
+    name = "fixes"
+    def __init__(self): self.n = 0
+    def chat(self, messages, tools):
+        if not any(m["role"] == "tool" for m in messages):
+            return _tool_call()
+        self.n += 1
+        if self.n == 1:
+            return {"content": "Risk is 99%.", "tool_calls": []}
+        res = json.loads([m for m in messages if m["role"] == "tool"][-1]["content"])
+        return {"content": f"Risk is {res['p_shortfall_pct']}%.", "tool_calls": []}
+
+def test_liar_gets_replaced_by_fallback():
+    out = run_agent("What is my cash risk?", llm=LiarLLM())
+    assert out["fallback"] and out["retried"] and out["verified"]
+    assert "99" not in out["answer"]
+
+def test_llm_can_fix_itself_on_retry():
+    out = run_agent("What is my cash risk?", llm=FixesItself())
+    assert out["retried"] and not out["fallback"] and out["verified"]    

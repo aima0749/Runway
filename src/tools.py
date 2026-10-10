@@ -80,12 +80,11 @@ def get_runway() -> dict:
         "status": decisions.status(s.p_shortfall),
         "likely_cash_out_date": e.day_to_date(below_p50[0]) if len(below_p50) else None,
         "earliest_plausible_cash_out_date": e.day_to_date(below_p10[0]) if len(below_p10) else None,
-        "opening_cash_pkr": float(e.ds.settings.opening_cash_pkr),
-        "min_cash_p50_pkr": float(np.median(s.min_cash_dist)),
+        "opening_cash_pkr": round(float(e.ds.settings.opening_cash_pkr)),
+        "min_cash_p50_pkr": round(float(np.median(s.min_cash_dist))),
         "horizon_days": int(s.paths.shape[1]),
         "assumption": "Committed money only: existing invoices and known expenses.",
     }
-
 
 # ---------- Tool 2 ----------
 WHAT_IF_TYPES = {"hire", "add_expense", "delay_client", "weekly_sales"}
