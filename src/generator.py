@@ -115,17 +115,18 @@ def generate_business(
     monthly_revenue = invoice_total / months if months else 0.0
     monthly_cost = monthly_revenue * 0.65
     expenses: list[dict[str, object]] = []
-    for month_idx in range(months):
-        month = _month_start(start_date, month_idx)
-        for category, day, share in (("rent", 1, 0.20), ("salaries", 20, 0.55), ("suppliers", 25, 0.25)):
-            due = date(month.year, month.month, min(day, monthrange(month.year, month.month)[1]))
-            expenses.append({
-                "expense_id": f"E{len(expenses) + 1:06d}",
-                "category": category,
-                "amount_pkr": round(monthly_cost * share, 2),
-                "due_date": _date_string(due),
-                "recurrence": "monthly",
-            })
+    # A monthly row is a recurring template consumed by simulate_cash. Emit
+    # one template per category instead of one duplicate template per month.
+    month = _month_start(start_date, 0)
+    for category, day, share in (("rent", 1, 0.20), ("salaries", 20, 0.55), ("suppliers", 25, 0.25)):
+        due = date(month.year, month.month, min(day, monthrange(month.year, month.month)[1]))
+        expenses.append({
+            "expense_id": f"E{len(expenses) + 1:06d}",
+            "category": category,
+            "amount_pkr": round(monthly_cost * share, 2),
+            "due_date": _date_string(due),
+            "recurrence": "monthly",
+        })
 
     return (
         pd.DataFrame(clients, columns=CLIENT_COLUMNS),
@@ -157,8 +158,8 @@ def main() -> None:
         expenses.to_csv(output / "expenses.csv", index=False)
         settings = {
             "as_of_date": "2025-12-31",
-            "opening_cash_pkr": round(float(expenses["amount_pkr"].sum()) / 24 * 2, 2),
-            "min_buffer_pkr": round(float(expenses["amount_pkr"].sum()) / 24, 2),
+            "opening_cash_pkr": round(float(expenses["amount_pkr"].sum()) * 2, 2),
+            "min_buffer_pkr": round(float(expenses["amount_pkr"].sum()), 2),
         }
         (output / "settings.json").write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
 

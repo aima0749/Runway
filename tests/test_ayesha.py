@@ -17,6 +17,9 @@ def test_ayesha_files_load_and_have_five_large_open_invoices(tmp_path) -> None:
     assert (tmp_path / "settings.json").is_file()
     assert (tmp_path / "README.md").is_file()
     assert len(dataset.clients) == 11
+    assert len(dataset.expenses) == 3
+    assert set(dataset.expenses["category"]) == {"rent", "salaries", "suppliers"}
+    assert dataset.expenses["recurrence"].eq("monthly").all()
 
     paid = pd.to_datetime(dataset.invoices["paid_date"])
     open_invoices = dataset.invoices.loc[paid > pd.Timestamp(AS_OF_DATE)]

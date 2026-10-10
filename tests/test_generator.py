@@ -23,6 +23,9 @@ def test_columns_and_payment_dates_match_contract() -> None:
     assert expenses.columns.tolist() == ["expense_id", "category", "amount_pkr", "due_date", "recurrence"]
     assert set(clients["segment"]).issubset({"corporate", "sme", "individual"})
     assert set(expenses["recurrence"]).issubset({"once", "monthly", "weekly"})
+    assert len(expenses) == 3
+    assert expenses["category"].nunique() == 3
+    assert expenses["recurrence"].eq("monthly").all()
     issue = pd.to_datetime(invoices["issue_date"])
     paid = pd.to_datetime(invoices["paid_date"])
     assert (paid >= issue + pd.Timedelta(days=1)).all()

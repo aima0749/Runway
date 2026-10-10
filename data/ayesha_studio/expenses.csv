@@ -1,0 +1,4 @@
+expense_id,category,amount_pkr,due_date,recurrence
+AYEXP0001,rent,60000.0,2024-01-01,monthly
+AYEXP0002,salaries,300000.0,2024-01-20,monthly
+AYEXP0003,suppliers,60000.0,2024-01-25,monthly

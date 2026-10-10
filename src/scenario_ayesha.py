@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import sys
 from calendar import monthrange
 from datetime import date, timedelta
 from pathlib import Path
@@ -115,27 +116,22 @@ def make_ayesha_dataset() -> Dataset:
     invoice_table = pd.DataFrame(invoices, columns=INVOICE_COLUMNS)
     expenses: list[dict[str, object]] = []
     expense_number = 1
-    # Include a year of scenario history and enough known recurring bills to
-    # cover the model's configured forecast horizon.
-    for month_index in range(16):
-        month = _month_start(date(2024, 1, 1), month_index)
-        for category, due_day in EXPENSE_DAYS.items():
-            due = date(month.year, month.month, min(due_day, monthrange(month.year, month.month)[1]))
-            expenses.append({
-                "expense_id": f"AYEXP{expense_number:04d}",
-                "category": category,
-                "amount_pkr": EXPENSE_AMOUNTS[category],
-                "due_date": due.isoformat(),
-                "recurrence": "monthly",
-            })
-            expense_number += 1
+    # One row describes each monthly recurring category. The simulator repeats
+    # each row, so duplicate months here would multiply the cash outflow.
+    first_month = date(2024, 1, 1)
+    for category, due_day in EXPENSE_DAYS.items():
+        due = date(first_month.year, first_month.month, due_day)
+        expenses.append({
+            "expense_id": f"AYEXP{expense_number:04d}",
+            "category": category,
+            "amount_pkr": EXPENSE_AMOUNTS[category],
+            "due_date": due.isoformat(),
+            "recurrence": "monthly",
+        })
+        expense_number += 1
 
     expense_table = pd.DataFrame(expenses, columns=EXPENSE_COLUMNS)
-    opening_cash = _paper_projection_opening_cash(
-        invoice_table,
-        expense_table,
-        pd.Timestamp(AS_OF_DATE),
-    )
+    opening_cash = 299_000.0
     return Dataset(
         clients=clients,
         invoices=invoice_table,
@@ -149,10 +145,37 @@ def make_ayesha_dataset() -> Dataset:
 
 
 def _future_expense_rows(expenses: pd.DataFrame, as_of: pd.Timestamp, horizon: int) -> pd.DataFrame:
-    """Select known expense dates inside the chosen projection horizon."""
+    """Expand recurring expense templates into dates inside the horizon."""
     due = pd.to_datetime(expenses["due_date"])
     end = as_of + pd.Timedelta(days=horizon)
-    return expenses.loc[(due > as_of) & (due <= end)].copy()
+    rows: list[dict[str, object]] = []
+    for row in expenses.itertuples(index=False):
+        recurrence = str(row.recurrence).lower()
+        anchor = pd.Timestamp(row.due_date)
+        if recurrence == "monthly":
+            month_index = as_of.year * 12 + as_of.month - 1
+            final_index = end.year * 12 + end.month - 1
+            for index in range(month_index, final_index + 1):
+                year, month = divmod(index, 12)
+                day = min(anchor.day, monthrange(year, month + 1)[1])
+                occurrence = pd.Timestamp(date(year, month + 1, day))
+                if as_of < occurrence <= end:
+                    rows.append({
+                        "expense_id": row.expense_id,
+                        "category": row.category,
+                        "amount_pkr": row.amount_pkr,
+                        "due_date": occurrence,
+                        "recurrence": "once",
+                    })
+        elif as_of < anchor <= end:
+            rows.append({
+                "expense_id": row.expense_id,
+                "category": row.category,
+                "amount_pkr": row.amount_pkr,
+                "due_date": anchor,
+                "recurrence": "once",
+            })
+    return pd.DataFrame(rows, columns=EXPENSE_COLUMNS)
 
 
 def _cash_path(
@@ -278,6 +301,8 @@ def check_ayesha(output_dir: str | Path = OUTPUT_DIR) -> None:
             samples,
             _future_expense_rows(dataset.expenses, as_of, HORIZON_DAYS),
             dataset.settings.opening_cash_pkr,
+            as_of,
+            age_open,
             horizon=HORIZON_DAYS,
             seed=SEED,
         )
@@ -289,6 +314,8 @@ def check_ayesha(output_dir: str | Path = OUTPUT_DIR) -> None:
             chased_samples,
             _future_expense_rows(dataset.expenses, as_of, HORIZON_DAYS),
             dataset.settings.opening_cash_pkr,
+            as_of,
+            age_open,
             horizon=HORIZON_DAYS,
             seed=SEED,
         )
@@ -315,8 +342,41 @@ def check_ayesha(output_dir: str | Path = OUTPUT_DIR) -> None:
 
 
 def main() -> None:
-    """Write the fixed scripted dataset and print its model check."""
-    check_ayesha()
+    """Run the scripted demo or an in-memory opening-cash sweep."""
+    if len(sys.argv) > 1 and sys.argv[1] == "--sweep-cash":
+        sweep_opening_cash()
+    else:
+        check_ayesha()
+
+
+def sweep_opening_cash() -> None:
+    """Compare shortfall and chase risk over cash values without writing files."""
+    dataset = make_ayesha_dataset()
+    model, X_open, age_open, open_invoices = build_pipeline(dataset, AS_OF_DATE)
+    samples = model.sample(X_open, age_open, n=N_SIMS, rng=np.random.default_rng(SEED))
+    expenses = _future_expense_rows(dataset.expenses, pd.Timestamp(AS_OF_DATE), HORIZON_DAYS)
+    largest = int(open_invoices["amount_pkr"].to_numpy().argmax())
+    chased_samples = samples.copy()
+    chased_samples[:, largest] = np.maximum(chased_samples[:, largest] - 10.0, age_open[largest] + 1.0)
+    dates = pd.date_range(pd.Timestamp(AS_OF_DATE) + pd.Timedelta(days=1), periods=HORIZON_DAYS, freq="D")
+
+    print("cash_pkr | risk_pct | min_cash_p50_pkr | cash_out_p50 | chased_risk_pct")
+    cash_values = list(range(250_000, 297_501, 2_500))
+    cash_values.extend(range(298_000, 300_001, 500))
+    for cash in cash_values:
+        result = simulate_cash(
+            open_invoices, samples, expenses, float(cash), AS_OF_DATE, age_open,
+            horizon=HORIZON_DAYS, seed=SEED,
+        )
+        chased = simulate_cash(
+            open_invoices, chased_samples, expenses, float(cash), AS_OF_DATE, age_open,
+            horizon=HORIZON_DAYS, seed=SEED,
+        )
+        median_cash_path = np.median(result.paths, axis=0)
+        below_zero = np.flatnonzero(median_cash_path < 0)
+        cash_out = dates[below_zero[0]].date().isoformat() if len(below_zero) else "none"
+        min_cash = float(np.median(result.min_cash_dist))
+        print(f"{cash:>8} | {result.p_shortfall * 100:>8.1f} | {min_cash:>16,.0f} | {cash_out:>12} | {chased.p_shortfall * 100:>15.1f}")
 
 
 if __name__ == "__main__":

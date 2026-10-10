@@ -1,0 +1,12 @@
+client_id,name,segment
+AY001,Fictional Northstar Retail,corporate
+AY002,Fictional Meridian Goods,corporate
+AY003,Fictional Paper Kite Agency,corporate
+AY004,Fictional Small Studio Client 1,sme
+AY005,Fictional Small Studio Client 2,sme
+AY006,Fictional Small Studio Client 3,sme
+AY007,Fictional Local Shop 1,sme
+AY008,Fictional Local Shop 2,sme
+AY009,Fictional Individual Client 1,individual
+AY010,Fictional Individual Client 2,individual
+AY011,Fictional Individual Client 3,individual
